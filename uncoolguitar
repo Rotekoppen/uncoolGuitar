@@ -1,0 +1,216 @@
+#!/bin/python
+import click
+import requests
+import json
+
+def build_page(tab, metadata, metadata_2):
+    # Convert tab text to html
+    tab = tab.replace(" ", "&nbsp;")
+
+    for tag in [
+        ("ch", "div class=\"tab-chord\""), 
+        ("/ch", "/div")
+    ]:
+        tab = tab.replace(f"[{tag[0]}]", f"<{tag[1]}>")
+
+    lines = []
+    for line in tab.split("\r\n"):
+        if line.startswith("[tab]"):
+            lines.append("<div class=\"tab-block\">" + "<div class=\"tab-line\">" + line[5:] + "</div>")
+        elif line.endswith("[/tab]"):
+            lines.append("<div class=\"tab-line\">" + line[:-6] + "</div>" + "</div>")
+        else:
+            if line.startswith("[") and line.endswith("]"):
+                lines.append( "<div class=\"tab-line tab-header\">" + line + "</div>" )
+            else:
+                lines.append( "<div class=\"tab-line\">" + line + "</div>" )
+    tab = "\n".join(lines) + "</div>"
+
+
+    # Create html page
+    style = """
+    :root {
+        --pal1: #fbf5ef;
+        --pal2: #f2d3ab;
+        --pal3: #c69fa5;
+        --pal4: #8b6d9c;
+        --pal5: #494d7e;
+        --pal6: #272744;
+    }
+
+    @media not print {
+        .info {
+            padding: 2rem;
+        }
+    }
+
+    @media print {
+        @page { margin: 0; }
+        body { margin: 1.6cm; }
+        .tab-chord { font-weight: 700; }
+        .buttons { display: none; }
+    }
+
+    body {
+        font-family: 'Courier New', monospace;
+        background: var(--pal1);
+        color: var(--pal5);
+    }
+
+    .buttons {
+        padding-left: 2rem;
+    }
+
+    #tab {
+        padding: 1rem;
+    }
+
+    .tab-line {
+        min-height: 19px;
+    }
+
+    .tab-line:not(.tab-header) {
+        margin-left: 1rem;
+    }
+
+    .tab-header {
+        padding: 1rem;
+        margin: 1rem 0rem;
+        background: var(--pal2);
+    }
+
+    .tab-block {
+        page-break-inside: avoid;
+    }
+
+    .tab-chord {
+        display: inline;
+        color: var(--pal6);
+    }
+    """
+    script = """
+    const backup = document.body.innerHTML
+    const fixes = [[/Cb/g, "B"], [/Db/g, "C#"], [/Eb/g, "D#"], [/Fb/g, "E"], [/Gb/g, "F#"], [/Ab/g, "G#"], [/Bb/g, "A#"]]
+    let transposeAmount = 0
+    function transposeChord(chord, amount) {
+        var scale = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+        return chord.replace(/[CDEFGAB]#?/g,
+            function(match) {
+                var i = (scale.indexOf(match) + amount) % scale.length;
+                return scale[ i < 0 ? i + scale.length : i ];
+            })
+    }
+
+    function transposeRestore() {
+        transposeAmount = 0
+        document.body.innerHTML = backup
+    }
+    
+    function transposeUp() {
+        transpose(+1)
+    }
+
+    function transposeDown() {
+        transpose(-1)
+    }
+
+    function transpose(amount) {
+        transposeAmount += amount
+        if (transposeAmount % 12 == 0) { return transposeRestore() }
+
+        for (chord of document.getElementsByClassName("tab-chord")) {
+            text = chord.innerHTML
+            for (i in fixes) {
+                text = text.replace(fixes[i][0], fixes[i][1]); 
+            }
+            chord.innerHTML = transposeChord(text, amount)
+        }
+
+        if (transposeAmount > 0) document.getElementById("transposeAmount").innerHTML = "+" + transposeAmount
+        else document.getElementById("transposeAmount").innerHTML = transposeAmount
+    }
+    """
+    capo = "No capo"
+    if "capo" in metadata_2:
+        if metadata_2["capo"] > 0:
+            capo = f"""Capo on fret {str(metadata_2["capo"])}"""
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+        
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+            <style>
+                {style}
+            </style>
+        </head>
+        
+        <body>
+            <div class="info">
+                <h1>{metadata["song_name"]} - {metadata["artist_name"]}</h1>
+                <div>{metadata["type_name"]} | key: <div class="tab-chord">{metadata["tonality_name"]}</div> | {capo} | tuning: {metadata_2["tuning"]["value"]} | rated: {str(metadata["rating"] / 0.05)[:4]}%</div>
+                <div>{metadata["version_description"]}</div>
+            </div>
+            <div class="buttons">
+                Transpose <button onclick="transposeDown()">-</button> <div id="transposeAmount" class="tab-chord">+0</div> <button onclick="transposeUp()">+</button>
+            </div>
+            <div id="tab">
+                {tab}
+            </div>
+            <script>
+                {script}
+            </script>
+        </body>
+
+    </html>
+    """
+
+def get_page_data(url):
+    # Get page
+    if not (response := requests.get(url)):
+        print("Couldnt get page")
+
+    # Get json data embedded in html
+    content = response.text
+    content = content[ content.find("data-content=\"") + 14 : ]
+    content = content[ : content.find("\"></div>") ]
+    content = content.replace("&quot;", "\"")
+    return json.loads(content)
+
+def extract_data(data):
+    # Get metadata
+    metadata = data["store"]["page"]["data"]["tab"]
+    metadata_2 = data["store"]["page"]["data"]["tab_view"]["meta"]
+
+    # Get Tab text
+    tab = data["store"]["page"]["data"]["tab_view"]["wiki_tab"]["content"]
+    return tab, metadata, metadata_2
+
+def get_path(path, metadata):
+    if path: return path
+    return f"""{metadata["song_name"]} - {metadata["artist_name"]}.html"""
+
+def write_page(path, page):
+    # Write page to file
+    file = open(path, "w")
+    file.write(page)
+    file.close()
+
+@click.command()
+@click.option("--path", default=None, help="Where to save file")
+@click.option('--url', prompt="Enter tab url", help="Url for tab")
+def full_pipeline(path, url):
+    """Converts a Ultimate Guitar page to a usable html, which can be printed."""
+    print("Getting page")
+    data = get_page_data(url)
+    print("Extracting data")
+    tab, metadata, metadata_2 = extract_data(data)
+    print("Building page")
+    page = build_page(tab, metadata, metadata_2)
+    print("Saving...")
+    path = get_path(path, metadata)
+    write_page(path, page)
+    print("Done :>")
+if __name__ == '__main__':
+    full_pipeline()
