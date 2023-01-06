@@ -90,11 +90,15 @@ def build_page(tab, metadata, metadata_2):
     """
     script = """
     const backup = document.body.innerHTML
-    const fixes = [[/Cb/g, "B"], [/Db/g, "C#"], [/Eb/g, "D#"], [/Fb/g, "E"], [/Gb/g, "F#"], [/Ab/g, "G#"], [/Bb/g, "A#"]]
+    const sharps_fixes = [[/Cb/g, "B"], [/Db/g, "C#"], [/Eb/g, "D#"], [/Fb/g, "E"], [/Gb/g, "F#"], [/Ab/g, "G#"], [/Bb/g, "A#"]]
+    const flats_fixes = [[/C#/g, "Db"], [/D#/g, "Eb"], [/E#/g, "Fb"], [/F#/g, "Gb"], [/G#/g, "Ab"], [/A#/g, "Bb"], [/B#/g, "C"]]
+    const sharps_scale = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+    const flats_scale = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+    let fixes = sharps_fixes
+    let scale = sharps_scale
     let transposeAmount = 0
     function transposeChord(chord, amount) {
-        var scale = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-        return chord.replace(/[CDEFGAB]#?/g,
+        return chord.replace(/[CDEFGAB][#b]?/g,
             function(match) {
                 var i = (scale.indexOf(match) + amount) % scale.length;
                 return scale[ i < 0 ? i + scale.length : i ];
@@ -115,7 +119,7 @@ def build_page(tab, metadata, metadata_2):
     }
 
     function transpose(amount) {
-        transposeAmount += amount
+    	transposeAmount += amount
         if (transposeAmount % 12 == 0) { return transposeRestore() }
 
         for (chord of document.getElementsByClassName("tab-chord")) {
@@ -129,6 +133,14 @@ def build_page(tab, metadata, metadata_2):
         if (transposeAmount > 0) document.getElementById("transposeAmount").innerHTML = "+" + transposeAmount
         else document.getElementById("transposeAmount").innerHTML = transposeAmount
     }
+    
+    function setUseFlats() {
+	scale = document.getElementById("useFlats").checked ? flats_scale : sharps_scale
+    	fixes = document.getElementById("useFlats").checked ? flats_fixes : sharps_fixes
+    	transpose(0)
+    }
+    
+    setUseFlats()
     """
     capo = "No capo"
     if "capo" in metadata_2:
@@ -153,7 +165,11 @@ def build_page(tab, metadata, metadata_2):
                 <div>{metadata["version_description"]}</div>
             </div>
             <div class="buttons">
-                Transpose <button onclick="transposeDown()">-</button> <div id="transposeAmount" class="tab-chord">+0</div> <button onclick="transposeUp()">+</button>
+                Transpose <button onclick="transposeDown()">-</button>
+        	<div id="transposeAmount" class="tab-chord">+0</div>
+        	<button onclick="transposeUp()">+</button>
+        	<label class="tab-chord" for="useFlats">Use flats</label>
+        	<input type="checkbox" id="useFlats" name="useFlats" onchange="setUseFlats()">
             </div>
             <div id="tab">
                 {tab}
